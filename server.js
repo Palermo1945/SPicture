@@ -5,13 +5,24 @@ import JSZip from 'jszip';
 import cors from 'cors';
 import axios from 'axios';
 import path from 'path';
+import { fileURLToPath } from 'url'; 
+import dotenv from 'dotenv'; // Import dotenv to manage environment variables
 import FormData from 'form-data';
+
+dotenv.config(); // Load environment variables
 
 const app = express();
 
 // Enable CORS for all routes
 app.use(cors());
 app.use(express.json());
+
+// Get __dirname using import.meta.url
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Serve static files from the dist folder
+app.use(express.static(path.join(__dirname, 'dist')));
 
 // Set up storage for multer
 const storage = multer.memoryStorage();
@@ -26,7 +37,7 @@ app.post('/api/upload-and-generate', upload.single('file'), async (req, res) => 
     const fileExt = path.extname(req.file.originalname).toLowerCase();
     let extractedText = '';
     let extractedImages = [];
-    
+
     if (fileExt !== '.docx') {
         return res.status(400).json({ error: 'Unsupported file format. Please upload a .docx file.' });
     }
@@ -39,24 +50,23 @@ app.post('/api/upload-and-generate', upload.single('file'), async (req, res) => 
         // Extract images from DOCX
         const zip = await JSZip.loadAsync(req.file.buffer);
         const imagePromises = Object.keys(zip.files)
-            .filter(filename => filename.startsWith('word/media/')) // Filter images in the 'media' folder
+            .filter(filename => filename.startsWith('word/media/')) 
             .map(async (filename) => {
-                const fileData = await zip.file(filename).async('base64'); // Read the image as base64
+                const fileData = await zip.file(filename).async('base64'); 
                 const base64Image = `data:image/png;base64,${fileData}`;
                 const imageName = path.basename(filename);
-
-                // Return image data
                 return { filename: imageName, data: base64Image };
             });
         extractedImages = await Promise.all(imagePromises);
 
         // Upload images to D-ID API and collect the resulting URLs
         const uploadedImageUrls = [];
+        const apiKey = process.env.D_ID_API_KEY; // Get API key from .env
         for (const image of extractedImages) {
             try {
                 const formData = new FormData();
-                const imageBuffer = Buffer.from(image.data.split(',')[1], 'base64'); // Convert base64 to buffer
-                formData.append('image', imageBuffer, image.filename); // Append image data
+                const imageBuffer = Buffer.from(image.data.split(',')[1], 'base64'); 
+                formData.append('image', imageBuffer, image.filename);
 
                 const options = {
                     method: 'POST',
@@ -64,15 +74,14 @@ app.post('/api/upload-and-generate', upload.single('file'), async (req, res) => 
                     headers: {
                         accept: 'application/json',
                         'Content-Type': 'multipart/form-data',
-                        'Authorization': 'Basic dGh5LmNocmlzdGlhbnBhbGVybW8rNEBnbWFpbC5jb20:4sWFmytOf_55XPrpHXbxM', // Your actual API key
+                        'Authorization': apiKey, 
                         ...formData.getHeaders(),
                     },
                     data: formData,
                 };
 
                 const response = await axios.request(options);
-                console.log('D-ID API response:', response.data);
-                uploadedImageUrls.push(response.data.url); // Store the resulting URL
+                uploadedImageUrls.push(response.data.url); 
             } catch (uploadError) {
                 console.error('Error uploading image to D-ID API:', uploadError.message);
             }
@@ -89,32 +98,26 @@ app.post('/api/upload-and-generate', upload.single('file'), async (req, res) => 
                     voice_id: "en-CA-LiamNeural"
                 }
             },
-            source_url: uploadedImageUrls[0], // Use the first image URL as the source
+            source_url: uploadedImageUrls[0], 
             config: { stitch: true }
         };
         const headers = {
             accept: "application/json",
             "content-type": "application/json",
-            Authorization: "Basic dGh5LmNocmlzdGlhbnBhbGVybW8rNEBnbWFpbC5jb20:4sWFmytOf_55XPrpHXbxM"
+            Authorization: apiKey
         };
 
-        console.log('Sending request to D-ID API for video generation...');
         const videoResponse = await axios.post(url, payload, { headers });
         const talkId = videoResponse.data.id;
 
-        console.log('D-ID API request for video successful. Talk ID:', talkId);
-
-        // Poll for the result
         let statusData;
         const statusUrl = `https://api.d-id.com/talks/${talkId}`;
         while (true) {
             const statusResponse = await axios.get(statusUrl, { headers });
             statusData = statusResponse.data;
             if (statusData.status === 'done' && statusData.result_url) {
-                console.log('Video generation complete. Result URL:', statusData.result_url);
                 break;
             }
-            console.log('Video not ready yet, checking again in 10 seconds...');
             await new Promise(resolve => setTimeout(resolve, 10000));
         }
 
@@ -126,8 +129,13 @@ app.post('/api/upload-and-generate', upload.single('file'), async (req, res) => 
     }
 });
 
-// Start the server
+// Catch-all route to serve the index.html file in dist
+app.get('*', (req, res) => {
+    res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+});
+
+// Bind server to the correct port (Heroku or local)
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on ${process.env.HOST || 'http://localhost'}:${PORT}`);
 });

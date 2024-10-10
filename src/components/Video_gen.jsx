@@ -1,4 +1,3 @@
-// src/UploadAndGenerate.js
 import React, { useState } from 'react';
 import axios from 'axios';
 import '../index.css'; // or './App.css'
@@ -26,7 +25,7 @@ const Video = () => {
         setError('');
 
         try {
-            const response = await axios.post('http://localhost:3000/api/upload-and-generate', formData, {
+            const response = await axios.post(`${process.env.REACT_APP_BACKEND_URL}/api/upload-and-generate`, formData, {
                 headers: {
                     'Content-Type': 'multipart/form-data',
                 },
