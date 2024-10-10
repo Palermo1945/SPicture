@@ -25,7 +25,7 @@ const Video = () => {
         setError('');
 
         try {
-            const response = await axios.post(`https://spicture.onrender.com/api/upload-and-generate`, formData, {
+            const response = await axios.post(`http://localhost:3000/api/upload-and-generate`, formData, {
                 headers: {
                     'Content-Type': 'multipart/form-data',
                 },
